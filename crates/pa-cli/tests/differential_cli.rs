@@ -341,6 +341,9 @@ fn run(binary: &Path, args: &[&str], sandbox: &Path) -> InvocationOutput {
         // doctor, shutdown) must never see this box's real sockets, and
         // `shutdown --force` on the TS binary has no containment guard.
         .env("TMPDIR", sandbox.join("tmp"))
+        // A run from inside a prime-agent session inherits the live daemon's
+        // socket pin, which would make that daemon this root's own.
+        .env_remove("PRIME_AGENT_DAEMON_SOCKET")
         .env("PI_OFFLINE", "1")
         .current_dir(sandbox.join("cwd"))
         .current_dir(sandbox.join("cwd"))
