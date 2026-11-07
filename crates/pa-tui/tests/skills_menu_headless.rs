@@ -177,6 +177,7 @@ impl MockSupervisor {
                         }),
                     );
                     write_session_event(&mut writer, &json!({ "type": "turn_end" }));
+                    write_session_event(&mut writer, &json!({ "type": "agent_end" }));
                 }
                 _ => {
                     write_json(
