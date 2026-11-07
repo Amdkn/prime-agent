@@ -3,7 +3,7 @@
 use super::{
     assistant_message_parts, event_to_update, pop_superseded_attempt_row, AgentView, ChatEntry,
     CompactionReason, CompactionState, DaemonClientEvent, DaemonCommand, Map, MessageBlock, Result,
-    RetryState, SessionUi, StatusKind, ToolResultView, TurnUpdate, Value,
+    RetryState, RunEvent, SessionUi, StatusKind, ToolResultView, TurnUpdate, Value,
 };
 
 /// One backgrounded compaction-abort outcome: a failed abort surfaces as
@@ -234,8 +234,7 @@ impl SessionUi {
                 reason,
             } => {
                 if active_session_id == self.active_session_id {
-                    self.turn_active = false;
-                    view.working = None;
+                    self.apply_run_event(RunEvent::Ended, view);
                     self.bash_list_epoch += 1;
                     self.factory_list_epoch += 1;
                     self.bash_activities = serde_json::json!({"activities": []});
@@ -347,7 +346,7 @@ impl SessionUi {
     fn apply_update(&mut self, update: TurnUpdate, view: &mut AgentView) {
         match update {
             TurnUpdate::TurnStarted => {
-                self.turn_active = true;
+                self.apply_run_event(RunEvent::Started, view);
                 self.turn_error_shown = false;
                 // A new turn also settles leftovers from a lost turn-end frame.
                 crate::snapshot::settle_pending_tool_cards(
@@ -357,7 +356,6 @@ impl SessionUi {
                     "the turn ended before this call returned",
                 );
                 self.aborted_tools.clear();
-                self.start_loader(view);
             }
             TurnUpdate::UserMessage(text) => {
                 match crate::custom_message::skill_invocation_entries(&text) {
@@ -401,7 +399,7 @@ impl SessionUi {
                 // frames — it would allocate a fresh card whose timer then
                 // reticks the settled id on this run's paints, so it lands
                 // on nothing too.
-                if !self.aborted_tools.contains(&tool_call_id) && self.turn_active {
+                if !self.aborted_tools.contains(&tool_call_id) && self.run_state.is_busy() {
                     crate::snapshot::apply_tool_execution_start(
                         view,
                         &tool_call_id,
@@ -448,7 +446,6 @@ impl SessionUi {
                 // One LLM turn ended; the run, and with it the busy state, lasts until
                 // `agent_end`.
                 self.streaming_index = None;
-                self.turn_ends_seen += 1;
                 view.retry = None;
                 crate::snapshot::settle_pending_tool_cards(
                     view,
@@ -511,9 +508,8 @@ impl SessionUi {
                 reason,
                 custom_instructions,
             } => {
-                // The compaction loader replaces the working loader; the generation bump retires
-                // every in-flight abort outcome from an earlier run's loader.
-                view.working = None;
+                // The compaction loader renders over the working loader; the generation bump
+                // retires every in-flight abort outcome from an earlier run's loader.
                 view.compaction_generation += 1;
                 view.compaction = Some(CompactionState {
                     reason: CompactionReason::parse(&reason),
@@ -657,9 +653,7 @@ impl SessionUi {
     /// The agent run ended: the busy state clears and the held bash cards stream into the
     /// transcript.
     fn end_run(&mut self, view: &mut AgentView) {
-        self.turn_active = false;
-        view.working = None;
-        view.working_since = None;
+        self.apply_run_event(RunEvent::Ended, view);
         Self::flush_pending_bash(view);
         // A detached run's `turn_end` never arrives: its open cards settle here.
         crate::snapshot::settle_pending_tool_cards(
@@ -682,7 +676,7 @@ impl SessionUi {
             // The interrupt cancels the compaction run only — the agent is not
             // streaming, so no turn abort goes out.
             self.abort_compaction(view.compaction_generation);
-        } else if self.turn_active {
+        } else if self.run_state.is_busy() {
             // No transient abort hint: the aborted turn's own assistant row carries
             // the interrupt, so nothing is noted here.
             self.abort_turn();
