@@ -1,0 +1,17 @@
+[package]
+name = "aspace-prime-agent-adapter"
+version = "0.10.2"
+edition = "2021"
+license = "MIT"
+description = "A'Space adapter for prime-agent, the recursion engine (H1) — D-N052 R2 (= F8 pas 6)"
+repository = "https://github.com/Amdkn/prime-agent"
+
+# Standalone crate: not a member of the fork workspace. The adapter never
+# imports the fork (no pa-* dependency, std only) — H-M2.
+[workspace]
+
+[lib]
+name = "aspace_prime_agent_adapter"
+path = "src/lib.rs"
+
+[dev-dependencies]
